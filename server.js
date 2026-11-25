@@ -18,6 +18,10 @@ if (NODE_MAJOR < 18) {
  *  - 严格 CSP：无内联脚本、无外部资源、无 eval。
  *  - 解锁失败指数退避，状态落盘，重启无法绕过。
  *  - 不记录任何请求体、密码或条目内容。
+ *
+ * 两种运行方式共用本文件：
+ *  - 命令行：node server.js（start.command / launchd 服务）
+ *  - 桌面应用：desktop/main.js 通过 startServer() 加载，窗口就是它的界面
  */
 
 const http = require('node:http');
@@ -29,14 +33,10 @@ const { Vault, VaultError } = require('./lib/vault');
 
 const APP_DIR = __dirname;
 const STATIC_DIR = path.join(APP_DIR, 'public');
-const DATA_DIR = process.env.QSECRET_DATA
-  ? path.resolve(process.env.QSECRET_DATA)
-  : path.join(APP_DIR, 'data');
 
 const HOST = '127.0.0.1';
-const PORT = Number(process.env.QSECRET_PORT || 7878);
+const DEFAULT_PORT = 7878;
 // 由 launchd 等服务管理器拉起时置 1：端口被占时不退出，改为等待重试
-const SERVICE_MODE = process.env.QSECRET_SERVICE === '1';
 const PORT_RETRY_MS = 10 * 1000;
 
 const IDLE_SWEEP_MS = 10 * 1000;
@@ -45,16 +45,35 @@ const SESSION_COOKIE = 'qsid';
 const MAX_BODY = 1024 * 1024;
 const MAX_RESTORE_BODY = 64 * 1024 * 1024;
 
-const vault = new Vault(DATA_DIR);
-const sessions = new Map(); // sid -> { csrf, createdAt, lastSeen }
+// 运行期状态：全部由 startServer() 填充。命令行与桌面应用共用同一套服务逻辑。
+let DATA_DIR = null;
+let PORT = DEFAULT_PORT;
+let SERVICE_MODE = false;
+// 桌面应用模式：多出「登录时自启」接口，并显示数据目录
+let DESKTOP_MODE = false;
+let autostartHook = null; // { get(), set(enabled), unavailableReason() }
+let onError = null;
+let logSink = null;
+
+let vault = null;
+let sessions = new Map(); // sid -> { csrf, createdAt, lastSeen }
+let server = null;
+
+function authStatePath() {
+  return path.join(DATA_DIR, 'auth-state.json');
+}
+
+function autoStartInfo() {
+  if (!autostartHook) return null;
+  const reason = autostartHook.unavailableReason ? autostartHook.unavailableReason() : null;
+  return { autoStart: !!autostartHook.get(), reason };
+}
 
 // ---------------------------------------------------------------- 失败退避
 
-const authStatePath = path.join(DATA_DIR, 'auth-state.json');
-
 function readAuthState() {
   try {
-    const raw = JSON.parse(fs.readFileSync(authStatePath, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(authStatePath(), 'utf8'));
     return {
       fails: Number(raw.fails) || 0,
       lockUntil: Number(raw.lockUntil) || 0,
@@ -67,9 +86,9 @@ function readAuthState() {
 function writeAuthState(state) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-    const tmp = `${authStatePath}.tmp`;
+    const tmp = `${authStatePath()}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
-    fs.renameSync(tmp, authStatePath);
+    fs.renameSync(tmp, authStatePath());
   } catch {
     /* 状态写失败不阻断登录，但下次仍会重新计数 */
   }
@@ -145,20 +164,6 @@ function effectiveIdleMs() {
   }
   return minutes * 60 * 1000;
 }
-
-setInterval(() => {
-  if (sessions.size === 0) return;
-  const now = Date.now();
-  const idleMs = effectiveIdleMs();
-  let expired = false;
-  for (const s of sessions.values()) {
-    if (now - s.lastSeen > idleMs || now - s.createdAt > ABSOLUTE_TIMEOUT_MS) expired = true;
-  }
-  if (expired) {
-    log('会话空闲超时，已自动锁定');
-    destroyAllSessions();
-  }
-}, IDLE_SWEEP_MS).unref();
 
 function parseCookies(header) {
   const out = {};
@@ -318,6 +323,7 @@ function serveStatic(res, pathname) {
     '/': 'index.html',
     '/index.html': 'index.html',
     '/app.js': 'app.js',
+    '/theme.js': 'theme.js',
     '/style.css': 'style.css',
     '/favicon.svg': 'favicon.svg',
   };
@@ -346,7 +352,9 @@ function log(msg) {
   const p = (n) => String(n).padStart(2, '0');
   const ts = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
     + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-  process.stdout.write(`[${ts}] ${msg}\n`);
+  const line = `[${ts}] ${msg}`;
+  if (logSink && logSink !== log) return logSink(line);
+  process.stdout.write(`${line}\n`);
 }
 
 // ---------------------------------------------------------------- 密码生成
@@ -401,6 +409,9 @@ async function handleApi(req, res, url) {
       idleMinutes: vault.unlocked ? safeSettings().idleMinutes : null,
       lockoutSeconds: Math.ceil(remaining / 1000),
       service: SERVICE_MODE,
+      desktop: DESKTOP_MODE,
+      autoStart: DESKTOP_MODE ? (autoStartInfo()?.autoStart ?? null) : null,
+      platform: DESKTOP_MODE ? process.platform : undefined,
       version: 1,
     });
   }
@@ -416,6 +427,8 @@ async function handleApi(req, res, url) {
       csrf: s.csrf,
       idleMinutes: safeSettings().idleMinutes,
       absoluteExpiresAt: s.createdAt + ABSOLUTE_TIMEOUT_MS,
+      // 数据目录只在已解锁后可见，界面用它显示真实的保险库位置
+      dataDir: DESKTOP_MODE ? DATA_DIR : undefined,
     });
   }
 
@@ -567,6 +580,25 @@ async function handleApi(req, res, url) {
     return res.end(bytes);
   }
 
+  // 「登录系统时自动启动」开关：仅桌面应用提供，且必须已解锁 + 带 CSRF 令牌
+  if (pathname === '/api/app/autostart' && DESKTOP_MODE && autostartHook) {
+    if (method === 'GET') return sendJson(res, 200, autoStartInfo());
+    if (method === 'PUT') {
+      const body = await readJson(req);
+      const enabled = body.enabled;
+      if (typeof enabled !== 'boolean') throw new VaultError('VALIDATION', 'enabled 必须是布尔值');
+      const reason = autostartHook.unavailableReason ? autostartHook.unavailableReason() : null;
+      if (reason) return sendError(res, 409, 'AUTOSTART_UNAVAILABLE', reason);
+      try {
+        autostartHook.set(enabled);
+      } catch (err) {
+        return sendError(res, 500, 'AUTOSTART_FAILED', `设置开机自启失败：${err && err.message ? err.message : err}`);
+      }
+      log(`登录时自动启动：${enabled ? '开启' : '关闭'}`);
+      return sendJson(res, 200, autoStartInfo());
+    }
+  }
+
   if (pathname === '/api/backup/restore' && method === 'POST') {
     const body = await readJson(req, MAX_RESTORE_BODY);
     const password = String(body.password || '');
@@ -613,69 +645,170 @@ function clearSessionCookie(res) {
 
 // ---------------------------------------------------------------- 入口
 
-const server = http.createServer(async (req, res) => {
-  securityHeaders(res);
+function createRequestHandler() {
+  return async (req, res) => {
+    securityHeaders(res);
 
-  let url;
-  try {
-    url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
-  } catch {
-    return sendError(res, 400, 'VALIDATION', '非法请求地址');
-  }
-
-  if (req.method === 'GET' && url.pathname.startsWith('/api/') === false) {
-    if (serveStatic(res, url.pathname)) return;
-    return sendError(res, 404, 'NOT_FOUND', '页面不存在');
-  }
-
-  try {
-    await handleApi(req, res, url);
-  } catch (err) {
-    if (res.headersSent) return res.end();
-    handleError(res, err);
-  }
-});
-
-server.on('error', (err) => {
-  if (err && err.code === 'EADDRINUSE') {
-    log(`端口 ${PORT} 已被占用——可能已有一个 Qsecret 在运行，直接打开 http://${HOST}:${PORT} 即可`);
-    if (SERVICE_MODE) {
-      // 后台服务不与手动启动的实例抢端口；对方退出后再接管
-      // 该定时器必须保持引用，否则事件循环为空会导致进程静默退出
-      setTimeout(() => server.listen(PORT, HOST), PORT_RETRY_MS);
-      return;
+    let url;
+    try {
+      url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
+    } catch {
+      return sendError(res, 400, 'VALIDATION', '非法请求地址');
     }
-    process.exit(0);
-  }
-  log(`服务启动失败：${err && err.message ? err.message : err}`);
-  process.exit(1);
-});
 
-server.on('clientError', (err, socket) => {
-  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
-});
+    if (req.method === 'GET' && url.pathname.startsWith('/api/') === false) {
+      if (serveStatic(res, url.pathname)) return;
+      return sendError(res, 404, 'NOT_FOUND', '页面不存在');
+    }
 
-server.headersTimeout = 15 * 1000;
-server.requestTimeout = 30 * 1000;
-server.keepAliveTimeout = 10 * 1000;
-
-process.on('uncaughtException', (err) => {
-  log(`未捕获异常: ${err && err.message ? err.message : err}`);
-});
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-
-function shutdown() {
-  log('正在退出，抹零内存密钥…');
-  destroyAllSessions();
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 500).unref();
+    try {
+      await handleApi(req, res, url);
+    } catch (err) {
+      if (res.headersSent) return res.end();
+      handleError(res, err);
+    }
+  };
 }
 
-server.listen(PORT, HOST, () => {
-  fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  log(`Qsecret 已启动  →  http://${HOST}:${PORT}${SERVICE_MODE ? '（后台服务模式）' : ''}`);
-  log(`数据目录：${DATA_DIR}`);
-  log(`保险库：${vault.exists() ? '已存在' : '尚未创建（首次打开会引导创建）'}`);
-});
+/**
+ * 启动服务。命令行直接运行本文件、以及桌面应用（Electron）都走这里。
+ *
+ * options:
+ *   dataDir      数据目录；缺省读 QSECRET_DATA，再缺省为应用目录下 data/
+ *   port         监听端口；缺省读 QSECRET_PORT，再缺省 7878。传 0 表示随机空闲端口
+ *   serviceMode  服务管理器模式（端口被占时等待接管）
+ *   desktop      桌面应用模式（开放自启接口、显示数据目录）
+ *   autostart    { get(), set(enabled), unavailableReason() } —— desktop 模式下由壳注入
+ *   log          日志函数，缺省写 stdout
+ *   onError      监听失败时的回调；缺省按命令行语义退出进程
+ *   standalone   是否接管进程信号与未捕获异常，缺省 true
+ */
+function startServer(options = {}) {
+  if (server) throw new Error('服务已经启动，不能重复调用 startServer');
+
+  DATA_DIR = options.dataDir
+    ? path.resolve(options.dataDir)
+    : process.env.QSECRET_DATA
+      ? path.resolve(process.env.QSECRET_DATA)
+      : path.join(APP_DIR, 'data');
+
+  const wantedPort = options.port != null ? Number(options.port) : Number(process.env.QSECRET_PORT || DEFAULT_PORT);
+  PORT = Number.isInteger(wantedPort) && wantedPort >= 0 && wantedPort <= 65535 ? wantedPort : DEFAULT_PORT;
+  SERVICE_MODE = options.serviceMode != null ? !!options.serviceMode : process.env.QSECRET_SERVICE === '1';
+  DESKTOP_MODE = !!options.desktop;
+  autostartHook = options.autostart || null;
+  onError = typeof options.onError === 'function' ? options.onError : null;
+  logSink = typeof options.log === 'function' ? options.log : null;
+  const standalone = options.standalone !== false;
+
+  vault = new Vault(DATA_DIR);
+  sessions = new Map();
+
+  server = http.createServer(createRequestHandler());
+
+  // 监听成功 / 失败的通知，供桌面壳决定何时打开窗口
+  let markReady;
+  const ready = new Promise((resolve, reject) => {
+    markReady = { resolve, reject };
+  });
+  // 命令行 / 服务模式下没有人 await：先挂一个空分支，避免 reject 变成未处理的拒绝而让进程崩溃
+  ready.catch(() => {});
+
+  const sweeper = setInterval(() => {
+    if (sessions.size === 0) return;
+    const now = Date.now();
+    const idleMs = effectiveIdleMs();
+    let expired = false;
+    for (const s of sessions.values()) {
+      if (now - s.lastSeen > idleMs || now - s.createdAt > ABSOLUTE_TIMEOUT_MS) expired = true;
+    }
+    if (expired) {
+      log('会话空闲超时，已自动锁定');
+      destroyAllSessions();
+    }
+  }, IDLE_SWEEP_MS);
+  sweeper.unref();
+
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      log(`端口 ${PORT} 已被占用——可能已有一个 Qsecret 在运行`);
+      markReady.reject(err);
+      if (onError) return onError(err);
+      if (SERVICE_MODE) {
+        // 后台服务不与手动启动的实例抢端口；对方退出后再接管
+        // 该定时器必须保持引用，否则事件循环为空会导致进程静默退出
+        setTimeout(() => server.listen(PORT, HOST), PORT_RETRY_MS);
+        return;
+      }
+      process.exit(0);
+    }
+    log(`服务启动失败：${err && err.message ? err.message : err}`);
+    markReady.reject(err);
+    if (onError) return onError(err);
+    process.exit(1);
+  });
+
+  server.on('clientError', (err, socket) => {
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  });
+
+  server.headersTimeout = 15 * 1000;
+  server.requestTimeout = 30 * 1000;
+  server.keepAliveTimeout = 10 * 1000;
+
+  server.listen(PORT, HOST, () => {
+    // 传 0 时拿到系统分配的实际端口，Host 校验要用真实值
+    PORT = server.address().port;
+    fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    log(`Qsecret 已启动  →  http://${HOST}:${PORT}${SERVICE_MODE ? '（后台服务模式）' : ''}`);
+    log(`数据目录：${DATA_DIR}`);
+    log(`保险库：${vault.exists() ? '已存在' : '尚未创建（首次打开会引导创建）'}`);
+    markReady.resolve();
+  });
+
+  function shutdown() {
+    log('正在退出，抹零内存密钥…');
+    destroyAllSessions();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 500).unref();
+  }
+
+  if (standalone) {
+    process.on('uncaughtException', (err) => {
+      log(`未捕获异常: ${err && err.message ? err.message : err}`);
+    });
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  }
+
+  return {
+    server,
+    /** 监听成功时 resolve；失败时 reject（之后仍会按 onError / 退出语义处理）。 */
+    ready,
+    get port() {
+      return PORT;
+    },
+    dataDir: DATA_DIR,
+    /** 立即锁定：清空全部会话并抹零内存中的密钥。 */
+    lock() {
+      destroyAllSessions();
+    },
+    async close() {
+      clearInterval(sweeper);
+      destroyAllSessions();
+      await new Promise((resolve) => {
+        server.close(() => {
+          server = null;
+          resolve();
+        });
+        if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+      });
+    },
+  };
+}
+
+module.exports = { startServer };
+
+if (require.main === module) {
+  startServer();
+}

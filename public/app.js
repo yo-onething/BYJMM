@@ -23,6 +23,8 @@ const state = {
   filter: { category: 'all', tag: null, q: '' },
   selectedId: null,
   idleMinutes: 5,
+  desktop: false,
+  platform: '',
   mode: 'unlock', // unlock | create
   lastActivity: Date.now(),
   revealed: new Map(),
@@ -41,9 +43,14 @@ function esc(value) {
 
 function toast(message, kind = 'ok') {
   const box = $('#toasts');
-  while (box.children.length >= 3) box.firstElementChild.remove();
+  // 同一条提示连续触发时替换上一条，避免快速操作堆成一列
+  const last = box.lastElementChild;
+  if (last && last.dataset.msg === message && last.dataset.kind === kind) last.remove();
+  while (box.children.length >= 2) box.firstElementChild.remove();
   const el = document.createElement('div');
   el.className = `toast${kind === 'error' ? ' error' : ''}`;
+  el.dataset.msg = message;
+  el.dataset.kind = kind;
   el.textContent = message;
   box.appendChild(el);
   setTimeout(() => {
@@ -165,7 +172,7 @@ function showAuth(mode, note = '') {
     authEls.confirmWrap.classList.remove('hidden');
     authEls.submit.textContent = '创建保险库';
     authEls.hint.textContent = '至少 12 位，建议 4 个以上不相关单词组合；不要与任何网站密码相同。';
-    authEls.note.textContent = '首次使用：数据将加密保存在本机应用目录。';
+    authEls.note.textContent = state.desktop ? '首次使用：数据将以密文保存在本机，不上传、不同步。' : '首次使用：数据将加密保存在本机应用目录。';
   } else {
     authEls.title.textContent = '解锁保险库';
     authEls.desc.textContent = '输入主密码。它只在本机内存中用于派生密钥，不会被保存或发送。';
@@ -247,17 +254,20 @@ function lockToAuth(note = '') {
 
 /* -------------------------------------------------------------- 主界面 */
 
-async function enterApp(csrf, idleMinutes) {
+async function enterApp(csrf, idleMinutes, dataDir) {
   state.csrf = csrf;
   if (!idleMinutes) {
     try {
       const s = await api('/api/session');
       idleMinutes = s.idleMinutes;
       state.csrf = s.csrf || csrf;
+      dataDir = dataDir || s.dataDir;
     } catch {
       idleMinutes = 5;
     }
   }
+  // 桌面应用里保险库不在应用目录：显示真实位置
+  if (state.desktop && dataDir) setVaultLocation(dataDir);
   state.idleMinutes = idleMinutes || 5;
   state.lastActivity = Date.now();
   $('#auth').classList.add('hidden');
@@ -374,10 +384,12 @@ function renderDetail() {
 
   if (!entry) {
     pane.innerHTML = `<div class="detail-empty">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
-        <rect x="4" y="3.5" width="16" height="17" rx="2.5"/>
-        <path d="M8 8h8M8 12h8M8 16h5" stroke-linecap="round"/>
-      </svg>
+      <span class="empty-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="4" y="3.5" width="16" height="17" rx="2.5"/>
+          <path d="M8 8h8M8 12h8M8 16h5" stroke-linecap="round"/>
+        </svg>
+      </span>
       <h3>选择左侧条目查看详情</h3>
       <p>密码默认隐藏，点击眼睛按钮才会向本地服务请求明文；复制记录不会被保存。</p>
     </div>`;
@@ -388,71 +400,69 @@ function renderDetail() {
   const revealed = state.revealed.get(entry.id);
   const pwValue = revealed ? revealed.password : '';
   const strength = entry.strength;
+  const level = scoreToBars(strength);
+  const initial = (entry.title || '?').trim().slice(0, 1);
 
   pane.innerHTML = `
-    <button class="btn ghost sm detail-back" data-action="back">← 返回列表</button>
-    <div class="detail-head">
-      <div class="detail-title-row">
-        <div>
+    <div class="detail-inner">
+      <button class="btn ghost sm detail-back" data-action="back">← 返回列表</button>
+
+      <header class="detail-head">
+        <span class="avatar lg" data-cat="${esc(entry.category)}" aria-hidden="true">${esc(initial)}</span>
+        <div class="detail-head-text">
           <h1 class="detail-title">${esc(entry.title)}</h1>
           <div class="detail-meta">
             <span class="chip">${esc(meta.label)}</span>
+            <span class="meta-dot" aria-hidden="true"></span>
             <span>更新于 ${esc(fmtTime(entry.updatedAt))}</span>
             ${entry.reused ? '<span class="chip danger">密码重复</span>' : ''}
           </div>
         </div>
         <div class="detail-actions">
-          <button class="btn ghost sm" data-action="edit">编辑</button>
+          <button class="btn sm" data-action="edit">编辑</button>
           <button class="btn ghost sm danger-ghost" data-action="delete">删除</button>
         </div>
-      </div>
-    </div>
+      </header>
 
-    <div class="field-row">
-      <span class="k">账号</span>
-      <span class="v ${entry.username ? '' : 'empty'}">${entry.username ? esc(entry.username) : '未填写'}</span>
-      <span class="a">${entry.username ? '<button class="copy-btn" data-copy="username" aria-label="复制账号"></button>' : ''}</span>
-    </div>
+      <section class="detail-card" aria-label="条目字段">
+        <div class="drow">
+          <span class="dk">账号</span>
+          <span class="dv ${entry.username ? '' : 'empty'}">${entry.username ? esc(entry.username) : '未填写'}</span>
+          <span class="da">${entry.username ? '<button class="copy-btn" data-copy="username" aria-label="复制账号" title="复制账号"></button>' : ''}</span>
+        </div>
 
-    <div class="field-row">
-      <span class="k">密码</span>
-      <span class="v mono ${revealed ? '' : 'empty'}">
-        ${revealed ? `<span class="pw-cell">${esc(pwValue)}</span>` : `<span class="dots">••••••••••••</span>`}
-      </span>
-      <span class="a">
-        <button class="icon-btn eye" data-action="toggle-reveal" aria-label="${revealed ? '隐藏密码' : '显示密码'}"></button>
-        <button class="copy-btn" data-copy="password" aria-label="复制密码"></button>
-      </span>
-    </div>
+        <div class="drow">
+          <span class="dk">密码</span>
+          <span class="dv mono">${revealed ? esc(pwValue) : '<span class="dots" aria-label="密码已隐藏">••••••••••••</span>'}</span>
+          <span class="da">
+            <button class="icon-btn eye" data-action="toggle-reveal" aria-label="${revealed ? '隐藏密码' : '显示密码'}" title="${revealed ? '隐藏密码' : '显示密码'}"></button>
+            <button class="copy-btn" data-copy="password" aria-label="复制密码" title="复制密码"></button>
+          </span>
+        </div>
 
-    <div class="field-row">
-      <span class="k">强度</span>
-      <span class="v">
-        <span class="pw-strength">
-          <span class="bar"><i data-strength="${strength}"></i></span>
-          <span>${esc(strengthLabel(strength))} · ${strength}/100</span>
-        </span>
-      </span>
-      <span class="a"></span>
-    </div>
+        <div class="drow">
+          <span class="dk">强度</span>
+          <span class="dv">
+            <span class="strength" data-level="${level}">
+              <span class="seg" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              <span class="strength-text">${esc(strengthLabel(strength))} · ${strength}/100</span>
+            </span>
+          </span>
+          <span class="da"></span>
+        </div>
 
-    <div class="field-row">
-      <span class="k">网址</span>
-      <span class="v ${entry.url ? '' : 'empty'}">${entry.url ? esc(entry.url) : '未填写'}</span>
-      <span class="a">${entry.url ? '<button class="copy-btn" data-copy="url" aria-label="复制网址"></button>' : ''}</span>
-    </div>
+        <div class="drow">
+          <span class="dk">网址</span>
+          <span class="dv ${entry.url ? '' : 'empty'}">${entry.url ? esc(entry.url) : '未填写'}</span>
+          <span class="da">${entry.url ? '<button class="copy-btn" data-copy="url" aria-label="复制网址" title="复制网址"></button>' : ''}</span>
+        </div>
+      </section>
 
-    ${entry.notes ? `<div class="detail-notes"><div class="detail-notes-label">备注</div>${esc(entry.notes)}</div>` : ''}
-    ${(entry.tags || []).length ? `<div class="tag-row">${entry.tags.map((t) => `<span class="chip">#${esc(t)}</span>`).join('')}</div>` : ''}
+      ${entry.notes ? `<div class="detail-label">备注</div><div class="detail-notes-body">${esc(entry.notes)}</div>` : ''}
+      ${(entry.tags || []).length ? `<div class="tag-row">${entry.tags.map((t) => `<span class="chip">#${esc(t)}</span>`).join('')}</div>` : ''}
+    </div>
   `;
 
-  // 强度条宽度与颜色由 CSSOM 设置（CSP 禁止内联 style 属性）
-  const bar = pane.querySelector('[data-strength]');
-  if (bar) {
-    const value = Math.max(4, strength);
-    bar.style.width = `${value}%`;
-    bar.style.background = strength >= 85 ? 'var(--accent)' : strength >= 60 ? '#9ed36a' : strength >= 40 ? 'var(--warn)' : 'var(--danger)';
-  }
   paintEye(pane.querySelector('[data-action="toggle-reveal"]'), !!revealed);
 
   // 详情内的操作按钮
@@ -782,6 +792,29 @@ $('#genUse').addEventListener('click', () => {
   state.genTarget = null;
 });
 
+/* -------------------------------------------------------------- 主题 */
+
+function syncThemeUI(pref) {
+  const sel = $('#setTheme');
+  if (sel) sel.value = pref;
+  const btn = $('#btnTheme');
+  if (btn) btn.title = document.documentElement.dataset.theme === 'light' ? '切换到深色' : '切换到浅色';
+}
+
+$('#btnTheme').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  try { localStorage.setItem(QsecretTheme.KEY, next); } catch { /* 存不了就只影响本次 */ }
+  QsecretTheme.apply(next);
+});
+
+$('#setTheme').addEventListener('change', (e) => {
+  try { localStorage.setItem(QsecretTheme.KEY, e.target.value); } catch { /* 同上 */ }
+  QsecretTheme.apply(e.target.value);
+});
+
+window.addEventListener('qsecret:theme', (e) => syncThemeUI(e.detail.pref));
+syncThemeUI(QsecretTheme.pref());
+
 /* -------------------------------------------------------------- 设置 */
 
 const settingsDialog = $('#settingsDialog');
@@ -794,11 +827,42 @@ $('#btnSettings').addEventListener('click', async () => {
   } catch {
     /* 使用当前值 */
   }
+  if (state.desktop) await refreshAutostart();
   $('#setOldPw').value = '';
   $('#setNewPw').value = '';
   $('#setError').textContent = '';
   $('#restoreFile').value = '';
   settingsDialog.showModal();
+});
+
+/* ------------------------------------------------- 登录时自动启动（仅桌面应用） */
+
+const AUTOSTART_HINT = '登录后在后台待命并保持锁定，需要输入主密码才能查看。关闭后每次要手动打开 Qsecret。';
+
+async function refreshAutostart() {
+  try {
+    const info = await api('/api/app/autostart');
+    $('#setAutostart').checked = !!info.autoStart;
+    $('#autostartHint').textContent = info.reason || AUTOSTART_HINT;
+  } catch {
+    $('#setAutostart').disabled = true;
+    $('#autostartHint').textContent = '当前无法读取系统的登录项设置。';
+  }
+}
+
+$('#setAutostart').addEventListener('change', async (e) => {
+  const enable = e.target.checked;
+  e.target.disabled = true;
+  try {
+    const info = await api('/api/app/autostart', { method: 'PUT', body: { enabled: enable } });
+    e.target.checked = !!info.autoStart;
+    toast(enable ? '已开启：登录系统时自动启动' : '已关闭：登录系统时自动启动');
+  } catch (err) {
+    e.target.checked = !enable;
+    toast(err.message || '设置失败', 'error');
+  } finally {
+    e.target.disabled = false;
+  }
 });
 
 $('#setIdle').addEventListener('change', async (e) => {
@@ -896,7 +960,13 @@ $('#restoreFile').addEventListener('change', async (e) => {
   }
 });
 
-$('#vaultPathHint').textContent = '数据文件：应用目录 / data / vault.qvault（权限 0600）';
+/** 把保险库所在目录同步到手册和设置页（桌面应用的数据目录不在应用里）。 */
+function setVaultLocation(dir) {
+  const file = `${dir.replace(/[\\/]+$/, '')}${state.platform === 'win32' ? '\\' : '/'}vault.qvault`;
+  $$('.vault-dir').forEach((el) => { el.textContent = dir; });
+  $$('.vault-path').forEach((el) => { el.textContent = file; });
+  $('#vaultPathHint').textContent = `数据文件：${file}（权限 0600）`;
+}
 
 /* -------------------------------------------------------------- 使用手册 */
 
@@ -947,16 +1017,39 @@ function openHelp(targetId) {
   $(sel).addEventListener('click', () => openHelp());
 });
 
-/** 把当前运行方式（后台服务 / 手动启动）同步到手册和设置页。 */
-function setRunMode(serviceMode) {
-  $('#helpMode').textContent = serviceMode ? '后台服务 · 登录后自启' : '手动启动';
-  $('#helpMode').classList.toggle('on', !!serviceMode);
-  $('#serviceHint').textContent = serviceMode
-    ? '当前运行方式：后台服务（已随系统登录自动启动，意外退出会自动拉起）。'
-    : '当前运行方式：手动启动（未安装后台服务，关闭启动窗口即停止）。';
-  $('#helpServiceStatus').textContent = serviceMode
+/** 把当前运行方式（桌面应用 / 后台服务 / 手动启动）同步到手册和设置页。 */
+function setRunMode(st) {
+  const desktop = !!st.desktop;
+  const service = !!st.service;
+  state.desktop = desktop;
+  state.platform = st.platform || '';
+
+  const kbd = $('.search kbd');
+  if (kbd) kbd.textContent = state.platform === 'win32' ? 'Ctrl K' : '⌘K';
+
+  $('#helpMode').textContent = desktop ? '桌面应用' : service ? '后台服务 · 登录后自启' : '手动启动';
+  $('#helpMode').classList.toggle('on', desktop || service);
+  $('#serviceHint').textContent = desktop
+    ? '当前运行方式：桌面应用。数据保存在本机的用户数据目录，只监听 127.0.0.1，不上传、不同步。'
+    : service
+      ? '当前运行方式：后台服务（已随系统登录自动启动，意外退出会自动拉起）。'
+      : '当前运行方式：手动启动（未安装后台服务，关闭启动窗口即停止）。';
+  $('#helpServiceStatus').textContent = service
     ? '当前状态：已安装为后台服务，正在以服务模式运行。'
     : '当前状态：未安装后台服务，本次为手动启动。需要开机自启，按下方说明安装即可。';
+
+  // 只显示与当前运行方式相关的说明
+  $('#helpServiceDesktop').classList.toggle('hidden', !desktop);
+  $('#helpServiceWeb').classList.toggle('hidden', desktop);
+  $$('.desktop-only').forEach((el) => el.classList.toggle('hidden', !desktop));
+  $$('.web-only').forEach((el) => el.classList.toggle('hidden', desktop));
+
+  if (desktop) {
+    // 实际目录要等解锁后才由接口返回；这里先给出该系统的默认位置
+    setVaultLocation(
+      st.platform === 'win32' ? '%APPDATA%\\Qsecret\\data' : '~/Library/Application Support/Qsecret/data'
+    );
+  }
 }
 
 /* -------------------------------------------------------------- 确认框 */
@@ -1054,7 +1147,7 @@ setInterval(() => {
   try {
     const res = await fetch('/api/state', { credentials: 'same-origin' });
     const st = await res.json();
-    setRunMode(!!st.service);
+    setRunMode(st);
     $('#boot').classList.add('hidden');
 
     if (!st.hasVault) {
@@ -1068,7 +1161,7 @@ setInterval(() => {
         const s = await fetch('/api/session', { credentials: 'same-origin' });
         const data = await s.json();
         if (s.ok && data.unlocked) {
-          await enterApp(data.csrf, data.idleMinutes);
+          await enterApp(data.csrf, data.idleMinutes, data.dataDir);
           return;
         }
       } catch {

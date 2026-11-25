@@ -7,5 +7,9 @@ data/
 .DS_Store
 *.log
 
-# 依赖（本项目零依赖，仅防误装）
+# 依赖（运行时零依赖；node_modules 里只有打包桌面包用的工具）
 node_modules/
+
+# 打包产物与下载缓存
+dist/
+.build-cache/

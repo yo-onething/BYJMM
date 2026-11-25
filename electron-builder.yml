@@ -1,0 +1,54 @@
+# electron-builder 配置 —— 只把运行必需的文件打进安装包
+appId: io.github.yo-onething.qsecret
+productName: Qsecret
+copyright: 个人项目，未经第三方安全审计
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - desktop/**
+  - lib/**
+  - public/**
+  - server.js
+  - package.json
+
+asar: true
+npmRebuild: false
+
+# Electron 运行时的下载缓存放在项目目录内（默认在系统缓存目录，已在 .gitignore 中忽略）。
+# 下载慢或连不上 GitHub 时，可设置环境变量 ELECTRON_MIRROR 指向镜像，例如：
+#   ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run dist:mac
+electronDownload:
+  cache: .build-cache/electron
+
+mac:
+  category: public.app-category.utilities
+  icon: build/icon.png
+  # 只产出未打包的 .app；架构由命令行决定（npm run dist:mac 带 --universal），
+  # 签名和 DMG 由 build/make-dmg.sh 完成
+  identity: null
+  hardenedRuntime: false
+  target:
+    - dir
+
+win:
+  icon: build/icon.png
+  artifactName: ${productName}-Setup-${version}.${ext}
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Qsecret
+  # 卸载时绝不删除保险库数据
+  deleteAppDataOnUninstall: false
+  installerLanguages: [zh_CN]
+  language: 2052

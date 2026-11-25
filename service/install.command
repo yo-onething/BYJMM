@@ -50,7 +50,7 @@ say "安装到：$DEST"
 # ---- 1. 复制应用（不覆盖已有数据目录）
 mkdir -p "$DEST" || die "无法创建目录 $DEST"
 if ! rsync -a --exclude 'data/' --exclude '.git/' --exclude 'node_modules/' --exclude '*.log' \
-      --exclude '.DS_Store' "$SRC/" "$DEST/"; then
+      --exclude 'dist/' --exclude '.build-cache/' --exclude '.DS_Store' "$SRC/" "$DEST/"; then
   die "复制文件失败"
 fi
 [ -f "$DEST/server.js" ] || die "$DEST 里没有 server.js，源目录不完整"

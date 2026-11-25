@@ -1,16 +1,24 @@
 {
   "name": "qsecret",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "本地密码保险库：零第三方依赖，scrypt + AES-256-GCM 全密文存储，可注册为 macOS 后台服务",
-  "main": "server.js",
+  "author": "yo-onething",
+  "description": "本地密码保险库：零第三方运行时依赖，scrypt + AES-256-GCM 全密文存储；可打包为 macOS / Windows 桌面应用",
+  "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/crypto.test.js && node test/api.test.js",
-    "service:install": "bash service/install.command",
-    "service:uninstall": "bash service/uninstall.command"
+    "desktop": "electron desktop/main.js",
+    "selftest": "electron desktop/main.js --selftest",
+    "test": "node test/crypto.test.js && node test/api.test.js && node test/server.unit.test.js",
+    "dist:mac": "electron-builder --mac dir --universal",
+    "dist:mac:dmg": "electron-builder --mac dir --universal && bash build/make-dmg.sh",
+    "dist:win": "electron-builder --win nsis:x64"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "45.5.0",
+    "electron-builder": "26.18.0"
   }
 }

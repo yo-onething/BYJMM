@@ -7,6 +7,7 @@
 <meta name="referrer" content="no-referrer">
 <title>Qsecret · 本地密码保险库</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script src="/theme.js"></script>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -107,6 +108,7 @@
       <button class="btn ghost" id="btnGenerate" type="button">生成密码</button>
       <button class="btn ghost" id="btnHelp" type="button">手册</button>
       <button class="btn ghost" id="btnSettings" type="button">设置</button>
+      <button class="icon-btn theme" id="btnTheme" type="button" aria-label="切换深浅色主题" title="切换深浅色主题"></button>
       <button class="btn ghost" id="btnLock" type="button">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <rect x="5" y="10" width="14" height="10" rx="2.2" stroke="currentColor" stroke-width="1.6"/>
@@ -276,6 +278,21 @@
 
   <div class="modal-body">
     <section class="settings-section">
+      <h3>外观</h3>
+      <label class="field row">
+        <span>
+          <span class="field-label">主题</span>
+          <span class="hint">深色适合夜间；浅色在强光下更清晰。顶栏的图标按钮也能快速切换。</span>
+        </span>
+        <select id="setTheme">
+          <option value="system">跟随系统</option>
+          <option value="dark">深色</option>
+          <option value="light">浅色</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="settings-section">
       <h3>会话</h3>
       <label class="field row">
         <span>
@@ -289,6 +306,16 @@
           <option value="30">30 分钟</option>
           <option value="60">60 分钟</option>
         </select>
+      </label>
+      <label class="field row desktop-only hidden" id="autostartRow">
+        <span>
+          <span class="field-label">登录系统时自动启动</span>
+          <span class="hint" id="autostartHint">登录后在后台待命并保持锁定，需要输入主密码才能查看。关闭后每次要手动打开 Qsecret。</span>
+        </span>
+        <span class="switch">
+          <input type="checkbox" id="setAutostart">
+          <i></i>
+        </span>
       </label>
     </section>
 
@@ -368,7 +395,7 @@
         <div class="callout warn">
           <b>主密码不会保存，也无法找回。</b> 忘记主密码等于永久失去全部数据，没有任何后门。设置后请立刻做一次加密备份（见第 7 节）。
         </div>
-        <p class="help-p">全部数据以密文保存在本机应用目录的 <code>data/vault.qvault</code>，不上传、不同步、无遥测。</p>
+        <p class="help-p">全部数据以密文保存在本机的 <code class="vault-path">应用目录 / data / vault.qvault</code>，不上传、不同步、无遥测。</p>
       </section>
 
       <section class="help-section" id="help-entries" data-title="管理条目">
@@ -376,7 +403,7 @@
         <table class="help-table">
           <tr><th>新建</th><td>右上角「新建条目」，或空列表里的「新建一条」。标题必填；分类有登录账号 / 银行卡 / 服务器·密钥 / 安全笔记 / 其他；标签用逗号分隔。</td></tr>
           <tr><th>查看</th><td>点左侧条目，右侧显示详情。密码默认是圆点，点眼睛图标才显示明文，<b>30 秒后自动隐藏</b>。</td></tr>
-          <tr><th>复制</th><td>账号、密码、网址右侧有复制按钮。复制后 <b>45 秒</b>尝试清空剪贴板（仅当内容没被你替换时）。需要浏览器授予剪贴板权限。</td></tr>
+          <tr><th>复制</th><td>账号、密码、网址右侧有复制按钮。复制后 <b>45 秒</b>尝试清空剪贴板（仅当内容没被你替换时）。桌面应用里直接可用；用浏览器打开时需要授予剪贴板权限。</td></tr>
           <tr><th>编辑</th><td>详情右上角「编辑」。打开时会自动读取并回填原密码；<b>密码框留空保存会把该条密码清空</b>。</td></tr>
           <tr><th>删除</th><td>详情右上角「删除」，需确认。删除后不可撤销，只能用之前的备份文件恢复。</td></tr>
         </table>
@@ -417,10 +444,10 @@
           <tr><th>手动锁定</th><td>右上角「锁定」，或 <kbd>⌘⇧L</kbd>（<kbd>Ctrl+Shift+L</kbd>）。密钥立即从内存抹除。</td></tr>
           <tr><th>空闲锁定</th><td>默认 5 分钟无操作自动锁定，可在设置中改为 1 / 5 / 15 / 30 / 60 分钟。左下角显示倒计时。</td></tr>
           <tr><th>绝对超时</th><td>解锁满 8 小时后必须重新输入主密码，无论是否在操作。</td></tr>
-          <tr><th>输错密码</th><td>第 5 次失败起锁定 60 秒，之后每次翻倍，最长 1 小时。计数保存在磁盘上，重启服务也绕不过。</td></tr>
+          <tr><th>输错密码</th><td>第 5 次失败起锁定 60 秒，之后每次翻倍，最长 1 小时。计数保存在磁盘上，重启之后也绕不过。</td></tr>
         </table>
         <div class="callout">
-          服务在后台运行 ≠ 保险库已解锁。电脑重启或服务自动启动后，仍然需要输入主密码才能看到任何条目。
+          应用在后台运行 ≠ 保险库已解锁。电脑重启或自动启动后，仍然需要输入主密码才能看到任何条目。
         </div>
       </section>
 
@@ -430,13 +457,31 @@
           <li><b>修改主密码</b>：设置 → 输入当前主密码和新主密码 → 确认。全部条目会用新密钥重新加密，旧密码立即失效。改完请重新下载一份备份。</li>
           <li><b>备份</b>：设置 → 「下载加密备份」，得到 <code>qsecret-backup-日期.qvault</code>。文件本身是密文，但请和主密码分开保存（例如备份放网盘，主密码记在纸上）。</li>
           <li><b>恢复</b>：设置 → 填写备份文件对应的主密码 → 选择 <code>.qvault</code> 文件 → 确认。<b>会覆盖当前全部数据</b>，系统会保留一份覆盖前的 <code>.bak</code>。</li>
-          <li><b>迁移电脑</b>：把整个应用目录拷到新机器，或在新机器建库后用备份恢复。</li>
-          <li><b>忘记主密码</b>：没有找回方式，只能删除 <code>data/vault.qvault</code> 后重新创建（旧数据放弃）。</li>
+          <li><b>迁移电脑</b>：在新电脑安装 Qsecret 并建库后，用备份文件恢复。不要在两台电脑上同时改数据——没有合并功能，后恢复的会覆盖当前数据。</li>
+          <li><b>忘记主密码</b>：没有找回方式，只能删除 <code class="vault-path">应用目录 / data / vault.qvault</code> 后重新创建（旧数据放弃）。</li>
         </ul>
       </section>
 
-      <section class="help-section" id="help-service" data-title="后台服务">
-        <h3>8. 后台服务（开机自启）</h3>
+      <section class="help-section" id="help-service" data-title="安装与自启">
+        <h3>8. 安装、更新与登录自启</h3>
+
+        <div id="helpServiceDesktop" class="hidden">
+          <p class="help-p">你正在使用桌面应用：双击打开，不需要安装 Node.js，也不需要浏览器。</p>
+          <table class="help-table">
+            <tr><th>macOS 安装</th><td>打开 <code>.dmg</code>，把 Qsecret 拖进「应用程序」文件夹，再从「应用程序」或启动台打开。<b>不要直接在安装镜像里运行</b>——那样无法设置登录自启。</td></tr>
+            <tr><th>Windows 安装</th><td>双击 <code>Qsecret-Setup-版本号.exe</code>，按向导安装（默认只装给当前用户，不需要管理员权限），从桌面或开始菜单打开。</td></tr>
+            <tr><th>登录自启</th><td>默认开启，可在「设置 → 登录系统时自动启动」关闭。登录后只在后台待命并<b>保持锁定</b>，不会自动弹出窗口；点应用图标即可打开。也可以在系统的登录项设置里管理（macOS：系统设置 → 通用 → 登录项；Windows：设置 → 应用 → 启动）。</td></tr>
+            <tr><th>关闭与退出</th><td>macOS 关闭窗口后应用留在程序坞，<b>保险库立即锁定</b>，再点图标打开时要重新输主密码；Windows 关闭窗口即退出。退出时内存中的密钥会被抹除。</td></tr>
+            <tr><th>数据位置</th><td><code class="vault-dir">用户数据目录</code>。卸载应用<b>不会</b>删除它；想彻底清除数据，手动删除这个文件夹。</td></tr>
+            <tr><th>更新</th><td>退出应用，安装新版本覆盖旧版本即可，数据位置不变。</td></tr>
+            <tr><th>卸载</th><td>macOS 把应用移到废纸篓；Windows 在「设置 → 应用」里卸载。两者都<b>不会删除保险库数据</b>。</td></tr>
+          </table>
+          <div class="callout warn">
+            <b>安装包没有数字签名时</b>，系统第一次会拦截：macOS 请到「系统设置 → 隐私与安全性」，在「安全性」下点「仍要打开」；Windows 提示「Windows 已保护你的电脑」时，点「更多信息 → 仍要运行」。
+          </div>
+        </div>
+
+        <div id="helpServiceWeb">
         <p class="help-p" id="helpServiceStatus"></p>
         <table class="help-table">
           <tr><th>安装</th><td>双击应用目录里的 <code>service/install.command</code>。之后每次登录系统自动在后台启动，意外退出会自动拉起。</td></tr>
@@ -447,6 +492,7 @@
         </table>
         <div class="callout warn">
           服务会固定使用安装时找到的 Node.js 路径。如果以后卸载或升级了那个 Node 版本，请重新运行一次 <code>service/install.command</code>。
+        </div>
         </div>
       </section>
 
@@ -463,13 +509,14 @@
         <h3>10. 常见问题</h3>
         <dl class="faq">
           <dt>页面打不开 / 提示"无法连接本地服务"</dt>
-          <dd>服务没在运行。装过后台服务的，在终端执行 <code>launchctl list | grep qsecret</code> 查看；没有的话双击 <code>start.command</code>。</dd>
+          <dd class="desktop-only hidden">应用没有正常启动。完全退出 Qsecret（macOS 按 ⌘Q）再重新打开；仍然不行就重新安装一次，数据不会丢。</dd>
+          <dd class="web-only">服务没在运行。装过后台服务的，在终端执行 <code>launchctl list | grep qsecret</code> 查看；没有的话双击 <code>start.command</code>。</dd>
           <dt>提示"尝试次数过多，请等待 N 秒"</dt>
           <dd>主密码连续输错触发了保护，等待倒计时结束后再试。等待时间会随失败次数变长。</dd>
           <dt>提示"文件完整性校验失败"</dt>
-          <dd>保险库文件被改动或损坏，出于安全已拒绝打开。把 <code>data/vault.qvault.bak</code> 改回 <code>vault.qvault</code> 试试，或用备份文件恢复。</dd>
+          <dd>保险库文件被改动或损坏，出于安全已拒绝打开。把 <code class="vault-path">应用目录 / data / vault.qvault</code> 同目录的 <code>vault.qvault.bak</code> 改名为 <code>vault.qvault</code> 试试，或用备份文件恢复。</dd>
           <dt>点复制提示"浏览器拒绝了剪贴板访问"</dt>
-          <dd>在浏览器地址栏的站点设置里允许剪贴板权限，或点眼睛显示后手动选择复制。</dd>
+          <dd>只在用浏览器打开时出现：在地址栏的站点设置里允许剪贴板权限，或点眼睛显示后手动选择复制。桌面应用里不会出现这个提示。</dd>
           <dt>能在手机或多台电脑上用吗？</dt>
           <dd>不提供云同步。其他设备可通过手动拷贝备份文件 + 恢复的方式使用，注意后恢复的会覆盖当前数据。</dd>
           <dt>它能防什么、不能防什么？</dt>
