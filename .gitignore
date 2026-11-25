@@ -1,0 +1,11 @@
+# 运行时数据：绝不提交
+data/
+*.qvault
+*.qvault.bak
+
+# 系统
+.DS_Store
+*.log
+
+# 依赖（本项目零依赖，仅防误装）
+node_modules/

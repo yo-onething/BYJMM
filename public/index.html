@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="referrer" content="no-referrer">
+<title>Qsecret · 本地密码保险库</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="boot" class="boot">
+  <div class="boot-mark" aria-hidden="true"></div>
+  <p>正在连接本地保险库…</p>
+</div>
+
+<!-- ============================= 解锁 / 创建 ============================= -->
+<section id="auth" class="auth hidden" aria-labelledby="authTitle">
+  <div class="auth-glow" aria-hidden="true"></div>
+
+  <div class="auth-card">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 2.6 4.5 5.4v6.1c0 4.6 3.1 8.6 7.5 9.9 4.4-1.3 7.5-5.3 7.5-9.9V5.4L12 2.6Z"
+                stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M12 8.4v3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="12" cy="14.6" r="1.5" fill="currentColor"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>Qsecret</h1>
+        <p>本地密码保险库</p>
+      </div>
+    </div>
+
+    <h2 id="authTitle" class="auth-title">解锁保险库</h2>
+    <p id="authDesc" class="auth-desc">输入主密码。它只在本机内存中用于派生密钥，不会被保存或发送。</p>
+
+    <form id="authForm" autocomplete="off" novalidate>
+      <label class="field">
+        <span class="field-label">主密码</span>
+        <span class="input-wrap">
+          <input id="authPassword" type="password" name="password" autocomplete="current-password"
+                 spellcheck="false" autocapitalize="off" placeholder="••••••••••••" required>
+          <button type="button" class="icon-btn" data-toggle-pw="authPassword" aria-label="显示密码" tabindex="-1"></button>
+        </span>
+      </label>
+
+      <div id="authConfirmWrap" class="hidden">
+        <label class="field">
+          <span class="field-label">确认主密码</span>
+          <span class="input-wrap">
+            <input id="authConfirm" type="password" autocomplete="new-password" spellcheck="false"
+                   autocapitalize="off" placeholder="再输入一次">
+            <button type="button" class="icon-btn" data-toggle-pw="authConfirm" aria-label="显示密码" tabindex="-1"></button>
+          </span>
+        </label>
+        <div class="meter" id="authStrength" data-score="0"><i></i><i></i><i></i><i></i></div>
+        <p class="hint" id="authHint">至少 12 位；忘记主密码将无法恢复任何数据。</p>
+      </div>
+
+      <p class="form-error" id="authError" role="alert"></p>
+
+      <button class="btn primary block" id="authSubmit" type="submit">解锁</button>
+    </form>
+
+    <p class="auth-note" id="authNote"></p>
+  </div>
+
+  <footer class="auth-foot">
+    <span>仅监听 127.0.0.1</span><span class="dot"></span>
+    <span>scrypt + AES-256-GCM</span><span class="dot"></span>
+    <span>无云同步 · 无遥测</span><span class="dot"></span>
+    <button class="link-btn" id="btnHelpAuth" type="button">使用手册</button>
+  </footer>
+</section>
+
+<!-- ============================= 主界面 ============================= -->
+<main id="app" class="app hidden">
+  <header class="topbar">
+    <div class="brand compact">
+      <div class="mark sm" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 2.6 4.5 5.4v6.1c0 4.6 3.1 8.6 7.5 9.9 4.4-1.3 7.5-5.3 7.5-9.9V5.4L12 2.6Z"
+                stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+          <circle cx="12" cy="13.6" r="1.6" fill="currentColor"/>
+          <path d="M12 8.6v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="brand-name">Qsecret</span>
+      <span class="pill">本地</span>
+    </div>
+
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.6"/>
+        <path d="m16 16 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <input id="search" type="search" placeholder="搜索标题、账号、网址、标签" autocomplete="off" spellcheck="false">
+      <kbd>⌘K</kbd>
+    </div>
+
+    <div class="top-actions">
+      <button class="btn ghost" id="btnGenerate" type="button">生成密码</button>
+      <button class="btn ghost" id="btnHelp" type="button">手册</button>
+      <button class="btn ghost" id="btnSettings" type="button">设置</button>
+      <button class="btn ghost" id="btnLock" type="button">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="5" y="10" width="14" height="10" rx="2.2" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M8.5 10V7.8a3.5 3.5 0 1 1 7 0V10" stroke="currentColor" stroke-width="1.6"/>
+        </svg>
+        锁定
+      </button>
+      <button class="btn primary" id="btnNew" type="button">新建条目</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" aria-label="分类与标签">
+      <div class="side-block">
+        <div class="side-title">分类</div>
+        <div id="catList" class="cat-list"></div>
+      </div>
+
+      <div class="side-block" id="tagBlock">
+        <div class="side-title">标签</div>
+        <div id="tagList" class="tag-cloud"></div>
+        <p class="side-empty" id="tagEmpty">暂无标签</p>
+      </div>
+
+      <div class="side-block">
+        <div class="side-title">安全概览</div>
+        <div class="stat-card">
+          <div class="stat-row">
+            <span>弱密码</span>
+            <b id="statWeak">0</b>
+          </div>
+          <div class="stat-row">
+            <span>重复使用</span>
+            <b id="statReused">0</b>
+          </div>
+          <div class="stat-bar"><i id="statBar"></i></div>
+          <p class="stat-note" id="statNote">全部条目已加密存储</p>
+        </div>
+        <div class="lock-timer">
+          <span class="dot-live" aria-hidden="true"></span>
+          <span>自动锁定</span>
+          <b id="idleTimer">--:--</b>
+        </div>
+      </div>
+    </nav>
+
+    <section class="listpane" aria-label="条目列表">
+      <div class="list-head">
+        <h2 id="listTitle">全部条目</h2>
+        <span class="count" id="listCount">0</span>
+      </div>
+      <div id="entryList" class="entries" role="list"></div>
+      <div class="list-empty hidden" id="listEmpty">
+        <p id="listEmptyText">没有匹配的条目</p>
+        <button class="btn ghost sm" id="btnEmptyNew" type="button">新建一条</button>
+      </div>
+    </section>
+
+    <section class="detailpane" id="detail" aria-label="条目详情"></section>
+  </div>
+</main>
+
+<!-- ============================= 条目编辑 ============================= -->
+<dialog id="entryDialog" class="modal wide">
+  <form id="entryForm" method="dialog" autocomplete="off" novalidate>
+    <header class="modal-head">
+      <h2 id="entryDialogTitle">新建条目</h2>
+      <button class="icon-btn close" type="button" data-close="entryDialog" aria-label="关闭"></button>
+    </header>
+
+    <div class="modal-body">
+      <div class="grid-2">
+        <label class="field">
+          <span class="field-label">标题 <em>必填</em></span>
+          <input id="fTitle" name="title" maxlength="200" placeholder="例如：公司邮箱" required>
+        </label>
+        <label class="field">
+          <span class="field-label">分类</span>
+          <select id="fCategory" name="category">
+            <option value="login">登录账号</option>
+            <option value="card">银行卡</option>
+            <option value="server">服务器 / 密钥</option>
+            <option value="note">安全笔记</option>
+            <option value="other">其他</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="field">
+        <span class="field-label">账号 / 用户名</span>
+        <input id="fUsername" name="username" maxlength="200" placeholder="name@example.com" spellcheck="false">
+      </label>
+
+      <label class="field">
+        <span class="field-label">密码 / 密钥</span>
+        <span class="input-wrap">
+          <input id="fPassword" name="password" type="password" maxlength="1024" spellcheck="false" autocomplete="new-password">
+          <button type="button" class="icon-btn" data-toggle-pw="fPassword" aria-label="显示密码" tabindex="-1"></button>
+          <button type="button" class="mini-btn" id="fGenerate" tabindex="-1">生成</button>
+        </span>
+        <div class="meter sm" id="fStrength" data-score="0"><i></i><i></i><i></i><i></i></div>
+      </label>
+
+      <label class="field">
+        <span class="field-label">网址</span>
+        <input id="fUrl" name="url" maxlength="2048" placeholder="https://" spellcheck="false">
+      </label>
+
+      <label class="field">
+        <span class="field-label">备注</span>
+        <textarea id="fNotes" name="notes" rows="3" maxlength="20000" placeholder="安全问题、二次验证恢复码等"></textarea>
+      </label>
+
+      <label class="field">
+        <span class="field-label">标签 <em>逗号分隔</em></span>
+        <input id="fTags" name="tags" maxlength="600" placeholder="工作, 财务">
+      </label>
+
+      <p class="form-error" id="entryError" role="alert"></p>
+    </div>
+
+    <footer class="modal-foot">
+      <button class="btn ghost" type="button" data-close="entryDialog">取消</button>
+      <button class="btn primary" type="submit" id="entrySave">保存</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ============================= 生成器 ============================= -->
+<dialog id="genDialog" class="modal">
+  <header class="modal-head">
+    <h2>密码生成器</h2>
+    <button class="icon-btn close" type="button" data-close="genDialog" aria-label="关闭"></button>
+  </header>
+  <div class="modal-body">
+    <div class="gen-output">
+      <code id="genValue">—</code>
+      <button class="icon-btn copy" type="button" id="genCopy" aria-label="复制"></button>
+    </div>
+    <div class="gen-meter"><i id="genBar"></i></div>
+
+    <label class="field">
+      <span class="field-label">长度 <b id="genLenLabel">20</b></span>
+      <input id="genLength" type="range" min="8" max="64" value="20" step="1">
+    </label>
+
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="genUpper" checked><span>大写 A-Z</span></label>
+      <label class="check"><input type="checkbox" id="genLower" checked><span>小写 a-z</span></label>
+      <label class="check"><input type="checkbox" id="genDigits" checked><span>数字 0-9</span></label>
+      <label class="check"><input type="checkbox" id="genSymbols" checked><span>符号 !@#$</span></label>
+      <label class="check"><input type="checkbox" id="genAvoid" checked><span>排除易混淆字符 0O1lI</span></label>
+    </div>
+  </div>
+  <footer class="modal-foot">
+    <button class="btn ghost" type="button" id="genRefresh">重新生成</button>
+    <button class="btn primary" type="button" id="genUse">使用此密码</button>
+  </footer>
+</dialog>
+
+<!-- ============================= 设置 ============================= -->
+<dialog id="settingsDialog" class="modal wide">
+  <header class="modal-head">
+    <h2>设置</h2>
+    <button class="icon-btn close" type="button" data-close="settingsDialog" aria-label="关闭"></button>
+  </header>
+
+  <div class="modal-body">
+    <section class="settings-section">
+      <h3>会话</h3>
+      <label class="field row">
+        <span>
+          <span class="field-label">空闲自动锁定</span>
+          <span class="hint">离开电脑时，密钥会自动从内存抹除。</span>
+        </span>
+        <select id="setIdle">
+          <option value="1">1 分钟</option>
+          <option value="5">5 分钟</option>
+          <option value="15">15 分钟</option>
+          <option value="30">30 分钟</option>
+          <option value="60">60 分钟</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="settings-section">
+      <h3>修改主密码</h3>
+      <p class="hint">会用新密钥重新加密全部条目；旧密码立即失效。</p>
+      <div class="grid-2">
+        <label class="field">
+          <span class="field-label">当前主密码</span>
+          <input id="setOldPw" type="password" autocomplete="current-password">
+        </label>
+        <label class="field">
+          <span class="field-label">新主密码</span>
+          <input id="setNewPw" type="password" autocomplete="new-password">
+        </label>
+      </div>
+      <p class="form-error" id="setError" role="alert"></p>
+      <button class="btn" type="button" id="setChangePw">更新主密码</button>
+    </section>
+
+    <section class="settings-section">
+      <h3>备份与恢复</h3>
+      <p class="hint">备份文件本身是加密的；请与主密码分开保存，两者同时泄露才会失守。</p>
+      <div class="row-actions">
+        <button class="btn ghost" type="button" id="btnBackup">下载加密备份</button>
+      </div>
+      <label class="field">
+        <span class="field-label">从备份文件恢复 <em>会覆盖当前保险库</em></span>
+        <input id="restorePassword" type="password" placeholder="备份文件的主密码" autocomplete="off">
+      </label>
+      <div class="row-actions">
+        <label class="btn ghost file-btn">
+          选择 .qvault 文件
+          <input type="file" id="restoreFile" accept=".qvault,application/octet-stream" hidden>
+        </label>
+      </div>
+      <p class="hint" id="vaultPathHint"></p>
+    </section>
+
+    <section class="settings-section about">
+      <h3>关于</h3>
+      <p class="hint">
+        数据仅保存在本机；服务只监听 127.0.0.1。加密：scrypt(N=2¹⁷) → HKDF-SHA256 → AES-256-GCM，
+        文件级 HMAC-SHA256 封印。Qsecret 为本地个人工具，未经过第三方安全审计。
+      </p>
+      <p class="hint" id="serviceHint"></p>
+      <div class="row-actions">
+        <button class="btn ghost" type="button" id="btnHelpSettings">打开使用手册</button>
+      </div>
+    </section>
+  </div>
+
+  <footer class="modal-foot">
+    <button class="btn primary" type="button" data-close="settingsDialog">完成</button>
+  </footer>
+</dialog>
+
+<!-- ============================= 使用手册 ============================= -->
+<dialog id="helpDialog" class="modal help" aria-labelledby="helpTitle">
+  <header class="modal-head">
+    <h2 id="helpTitle">使用手册</h2>
+    <span class="help-mode" id="helpMode"></span>
+    <button class="icon-btn close" type="button" data-close="helpDialog" aria-label="关闭"></button>
+  </header>
+
+  <div class="help-layout">
+    <nav class="help-toc" id="helpToc" aria-label="手册目录"></nav>
+
+    <div class="help-body" id="helpBody">
+      <section class="help-section" id="help-start" data-title="快速开始">
+        <h3>1. 快速开始</h3>
+        <ol class="steps">
+          <li><b>第一次打开</b>：页面会要求设置主密码，输入两次，至少 12 位。建议用 4 个以上互不相关的单词组成，不要和任何网站密码相同。</li>
+          <li><b>以后每次使用</b>：输入主密码，点「解锁」。按钮会显示"正在派生密钥…"约 1 秒——这是 scrypt 故意设计得慢，用来拖慢暴力破解。</li>
+          <li><b>添加第一条</b>：点右上角「新建条目」，填写后保存。</li>
+        </ol>
+        <div class="callout warn">
+          <b>主密码不会保存，也无法找回。</b> 忘记主密码等于永久失去全部数据，没有任何后门。设置后请立刻做一次加密备份（见第 7 节）。
+        </div>
+        <p class="help-p">全部数据以密文保存在本机应用目录的 <code>data/vault.qvault</code>，不上传、不同步、无遥测。</p>
+      </section>
+
+      <section class="help-section" id="help-entries" data-title="管理条目">
+        <h3>2. 管理条目</h3>
+        <table class="help-table">
+          <tr><th>新建</th><td>右上角「新建条目」，或空列表里的「新建一条」。标题必填；分类有登录账号 / 银行卡 / 服务器·密钥 / 安全笔记 / 其他；标签用逗号分隔。</td></tr>
+          <tr><th>查看</th><td>点左侧条目，右侧显示详情。密码默认是圆点，点眼睛图标才显示明文，<b>30 秒后自动隐藏</b>。</td></tr>
+          <tr><th>复制</th><td>账号、密码、网址右侧有复制按钮。复制后 <b>45 秒</b>尝试清空剪贴板（仅当内容没被你替换时）。需要浏览器授予剪贴板权限。</td></tr>
+          <tr><th>编辑</th><td>详情右上角「编辑」。打开时会自动读取并回填原密码；<b>密码框留空保存会把该条密码清空</b>。</td></tr>
+          <tr><th>删除</th><td>详情右上角「删除」，需确认。删除后不可撤销，只能用之前的备份文件恢复。</td></tr>
+        </table>
+      </section>
+
+      <section class="help-section" id="help-generator" data-title="密码生成器">
+        <h3>3. 密码生成器</h3>
+        <ul class="help-ul">
+          <li>入口：顶栏「生成密码」，或条目编辑框里密码右侧的「生成」。</li>
+          <li>长度 8–64 位，可勾选大写、小写、数字、符号；默认排除易混淆的 <code>0 O 1 l I</code>。</li>
+          <li>「使用此密码」：从条目里打开 → 直接填入密码框；从顶栏打开 → 复制到剪贴板。</li>
+          <li>随机数来自操作系统加密随机源，在本机生成，不经过网络。</li>
+        </ul>
+      </section>
+
+      <section class="help-section" id="help-find" data-title="查找与整理">
+        <h3>4. 查找与整理</h3>
+        <ul class="help-ul">
+          <li><b>搜索</b>：匹配标题、账号、网址、备注、标签。快捷键 <kbd>⌘K</kbd>（Windows 为 <kbd>Ctrl+K</kbd>）跳到搜索框，<kbd>Esc</kbd> 清空。</li>
+          <li><b>分类</b>：左侧分类栏带数量，点击筛选。</li>
+          <li><b>标签</b>：点标签筛选，再点一次取消；点分类会清除标签筛选。</li>
+          <li>搜索和筛选都在浏览器内存里完成，不会向服务发送任何请求。</li>
+        </ul>
+      </section>
+
+      <section class="help-section" id="help-health" data-title="安全概览">
+        <h3>5. 安全概览</h3>
+        <ul class="help-ul">
+          <li><b>弱密码</b>：强度评分低于 60 的条目数，列表里用黄色圆点标出。</li>
+          <li><b>重复使用</b>：与其他条目密码相同的条目数，列表里用红色圆点标出。一个网站泄露会连带其他网站，建议逐个改成独立密码。</li>
+          <li><b>健康度</b>：没有弱密码、没有重复的条目占比。</li>
+        </ul>
+      </section>
+
+      <section class="help-section" id="help-lock" data-title="锁定与会话">
+        <h3>6. 锁定与会话</h3>
+        <table class="help-table">
+          <tr><th>手动锁定</th><td>右上角「锁定」，或 <kbd>⌘⇧L</kbd>（<kbd>Ctrl+Shift+L</kbd>）。密钥立即从内存抹除。</td></tr>
+          <tr><th>空闲锁定</th><td>默认 5 分钟无操作自动锁定，可在设置中改为 1 / 5 / 15 / 30 / 60 分钟。左下角显示倒计时。</td></tr>
+          <tr><th>绝对超时</th><td>解锁满 8 小时后必须重新输入主密码，无论是否在操作。</td></tr>
+          <tr><th>输错密码</th><td>第 5 次失败起锁定 60 秒，之后每次翻倍，最长 1 小时。计数保存在磁盘上，重启服务也绕不过。</td></tr>
+        </table>
+        <div class="callout">
+          服务在后台运行 ≠ 保险库已解锁。电脑重启或服务自动启动后，仍然需要输入主密码才能看到任何条目。
+        </div>
+      </section>
+
+      <section class="help-section" id="help-backup" data-title="主密码与备份">
+        <h3>7. 主密码、备份与恢复</h3>
+        <ul class="help-ul">
+          <li><b>修改主密码</b>：设置 → 输入当前主密码和新主密码 → 确认。全部条目会用新密钥重新加密，旧密码立即失效。改完请重新下载一份备份。</li>
+          <li><b>备份</b>：设置 → 「下载加密备份」，得到 <code>qsecret-backup-日期.qvault</code>。文件本身是密文，但请和主密码分开保存（例如备份放网盘，主密码记在纸上）。</li>
+          <li><b>恢复</b>：设置 → 填写备份文件对应的主密码 → 选择 <code>.qvault</code> 文件 → 确认。<b>会覆盖当前全部数据</b>，系统会保留一份覆盖前的 <code>.bak</code>。</li>
+          <li><b>迁移电脑</b>：把整个应用目录拷到新机器，或在新机器建库后用备份恢复。</li>
+          <li><b>忘记主密码</b>：没有找回方式，只能删除 <code>data/vault.qvault</code> 后重新创建（旧数据放弃）。</li>
+        </ul>
+      </section>
+
+      <section class="help-section" id="help-service" data-title="后台服务">
+        <h3>8. 后台服务（开机自启）</h3>
+        <p class="help-p" id="helpServiceStatus"></p>
+        <table class="help-table">
+          <tr><th>安装</th><td>双击应用目录里的 <code>service/install.command</code>。之后每次登录系统自动在后台启动，意外退出会自动拉起。</td></tr>
+          <tr><th>卸载</th><td>双击 <code>service/uninstall.command</code>。只移除自启项和后台进程，<b>不会删除你的数据</b>。</td></tr>
+          <tr><th>访问</th><td>浏览器打开 <code>http://127.0.0.1:7878</code>，建议加到书签。服务只监听本机回环地址，局域网内其他设备无法访问。</td></tr>
+          <tr><th>日志</th><td><code>~/Library/Logs/qsecret.log</code>（错误在同目录 <code>qsecret.error.log</code>）。日志不含密码和条目内容。</td></tr>
+          <tr><th>手动启动</th><td>没装服务时，双击 <code>start.command</code>，关闭窗口即停止。若服务已在运行，双击它只会打开浏览器。</td></tr>
+        </table>
+        <div class="callout warn">
+          服务会固定使用安装时找到的 Node.js 路径。如果以后卸载或升级了那个 Node 版本，请重新运行一次 <code>service/install.command</code>。
+        </div>
+      </section>
+
+      <section class="help-section" id="help-keys" data-title="快捷键">
+        <h3>9. 快捷键</h3>
+        <table class="help-table keys">
+          <tr><th><kbd>⌘K</kbd> / <kbd>Ctrl+K</kbd></th><td>聚焦搜索框</td></tr>
+          <tr><th><kbd>Esc</kbd></th><td>清空搜索 / 关闭弹窗</td></tr>
+          <tr><th><kbd>⌘⇧L</kbd> / <kbd>Ctrl+Shift+L</kbd></th><td>立即锁定保险库</td></tr>
+        </table>
+      </section>
+
+      <section class="help-section" id="help-faq" data-title="常见问题">
+        <h3>10. 常见问题</h3>
+        <dl class="faq">
+          <dt>页面打不开 / 提示"无法连接本地服务"</dt>
+          <dd>服务没在运行。装过后台服务的，在终端执行 <code>launchctl list | grep qsecret</code> 查看；没有的话双击 <code>start.command</code>。</dd>
+          <dt>提示"尝试次数过多，请等待 N 秒"</dt>
+          <dd>主密码连续输错触发了保护，等待倒计时结束后再试。等待时间会随失败次数变长。</dd>
+          <dt>提示"文件完整性校验失败"</dt>
+          <dd>保险库文件被改动或损坏，出于安全已拒绝打开。把 <code>data/vault.qvault.bak</code> 改回 <code>vault.qvault</code> 试试，或用备份文件恢复。</dd>
+          <dt>点复制提示"浏览器拒绝了剪贴板访问"</dt>
+          <dd>在浏览器地址栏的站点设置里允许剪贴板权限，或点眼睛显示后手动选择复制。</dd>
+          <dt>能在手机或多台电脑上用吗？</dt>
+          <dd>不提供云同步。其他设备可通过手动拷贝备份文件 + 恢复的方式使用，注意后恢复的会覆盖当前数据。</dd>
+          <dt>它能防什么、不能防什么？</dt>
+          <dd>能防文件被拷走、被篡改、恶意网页跨站调用。防不了已经控制这台电脑的木马、键盘记录器和恶意浏览器扩展——任何本机密码管理器都一样。</dd>
+        </dl>
+      </section>
+    </div>
+  </div>
+</dialog>
+
+<!-- ============================= 通用确认 ============================= -->
+<dialog id="confirmDialog" class="modal">
+  <header class="modal-head">
+    <h2 id="confirmTitle">确认操作</h2>
+  </header>
+  <div class="modal-body">
+    <p id="confirmText" class="confirm-text"></p>
+  </div>
+  <footer class="modal-foot">
+    <button class="btn ghost" type="button" id="confirmCancel">取消</button>
+    <button class="btn danger" type="button" id="confirmOk">确认</button>
+  </footer>
+</dialog>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

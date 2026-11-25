@@ -1,0 +1,16 @@
+{
+  "name": "qsecret",
+  "version": "1.1.0",
+  "private": true,
+  "description": "本地密码保险库：零第三方依赖，scrypt + AES-256-GCM 全密文存储，可注册为 macOS 后台服务",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/crypto.test.js && node test/api.test.js",
+    "service:install": "bash service/install.command",
+    "service:uninstall": "bash service/uninstall.command"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
